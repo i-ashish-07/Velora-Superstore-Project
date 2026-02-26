@@ -59,3 +59,7 @@ This project aims to answer:
 -How does discount impact profitability?
 -Which region has the strongest sales-to-profit conversion?
 -What are the monthly seasonal trends in sales and profit?
+
+7️⃣ Dashboard Preview
+
+
