@@ -61,5 +61,7 @@ This project aims to answer:
 -What are the monthly seasonal trends in sales and profit?
 
 7️⃣ Dashboard Preview
-
+Page 1 – Executive Sales & Profit Performance
+https://github.com/i-ashish-07/Velora-Superstore-Project/blob/main/Screenshot%202026-02-25%20175520.png
+Page 2 – Profitability & Risk Analysis
 
