@@ -1,5 +1,7 @@
 ## 📊 Velora Superstore – Sales & Profit Performance Analysis
 
+1️⃣ Project Title
+Velora Superstore: Executive Sales & Profit Performance Dashboard
 An end-to-end data analytics project analyzing sales performance, profitability drivers, discount impact, and regional trends using Python, SQL concepts, and Power BI.
 
 2️⃣ Project Overview
