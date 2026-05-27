@@ -63,7 +63,7 @@ This project aims to answer:
 7️⃣ Dashboard Preview
 Page 1 – Executive Sales & Profit Performance
 
-![Alt text](https://github.com/i-ashish-07/Velora-Superstore-Project/blob/main/dashboard-1)
+![Alt text](https://github.com/i-ashish-07/Velora-Superstore-Project/blob/main/Screenshot%202026-05-27%20123435.png)
 Page 2 – Profitability & Risk Analysis
 ![Alt text](https://github.com/i-ashish-07/Velora-Superstore-Project/blob/main/dashboard-2)
 Page 3 - Insights and Recommendations
