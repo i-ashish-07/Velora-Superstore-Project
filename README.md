@@ -65,4 +65,4 @@ Page 1 – Executive Sales & Profit Performance
 
 ![Alt text](https://github.com/i-ashish-07/Velora-Superstore-Project/blob/main/dashboard-1)
 Page 2 – Profitability & Risk Analysis
-![Alt text](https://github.com/i-ashish-07/Velora-Superstore-Project/blob/main/Screenshot%202026-02-25%20175537.png)
+![Alt text](https://github.com/i-ashish-07/Velora-Superstore-Project/blob/main/dashboard-2)
