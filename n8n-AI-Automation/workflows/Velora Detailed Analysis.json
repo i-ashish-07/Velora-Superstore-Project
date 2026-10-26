@@ -1,0 +1,107 @@
+{
+  "name": "meow d",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "query"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ],
+      "id": "1eaa4fdb-7a1f-4025-9f63-ab41eef56849",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1unCC_QtuyjDm6We2aqewaLzijoyxv7g6_-uVJjBHPAQ",
+          "mode": "list",
+          "cachedResultName": "Velora_Superstore_Sample_2000",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1unCC_QtuyjDm6We2aqewaLzijoyxv7g6_-uVJjBHPAQ/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1107057720,
+          "mode": "list",
+          "cachedResultName": "Velora_Superstore_Sample_2000.csv",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1unCC_QtuyjDm6We2aqewaLzijoyxv7g6_-uVJjBHPAQ/edit#gid=1107057720"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        224,
+        0
+      ],
+      "id": "67488f35-21ed-49ab-a09f-3876dbef263c",
+      "name": "Get row(s) in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "JquCQavbg08HlY1N",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===================== VELORA ENGINE (shared) =====================\nconst MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];\nconst str = v => String(v ?? '').trim();\nconst num = v => {\n  if (typeof v === 'number') return Number.isFinite(v) ? v : NaN;\n  const s = str(v).replace(/[$,%\\s]/g, '');\n  if (s === '') return NaN;\n  const n = Number(s);\n  return Number.isFinite(n) ? n : NaN;\n};\nconst norm = s => str(s).toLowerCase().replace(/[^a-z0-9]/g, '');\nconst r2 = n => Math.round((n + Number.EPSILON) * 100) / 100;\n\nfunction mkDate(y, m, d) {\n  const dt = new Date(Date.UTC(y, m - 1, d));\n  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d ? dt : null;\n}\nfunction parseDate(v) {\n  if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v;\n  const s = str(v);\n  if (!s) return null;\n  let m = s.match(/^(\\d{4})[-/](\\d{1,2})[-/](\\d{1,2})/);\n  if (m) return mkDate(+m[1], +m[2], +m[3]);\n  m = s.match(/^(\\d{1,2})[-/](\\d{1,2})[-/](\\d{4}|\\d{2})(?!\\d)/);\n  if (m) {\n    let y = +m[3];\n    if (y < 100) y += y >= 70 ? 1900 : 2000;\n    // US month/day/year; if that is impossible (day > 12 in month slot) try day/month\n    return mkDate(y, +m[1], +m[2]) || mkDate(y, +m[2], +m[1]);\n  }\n  if (/^\\d{5}$/.test(s)) return new Date(Date.UTC(1899, 11, 30) + Number(s) * 86400000); // Sheets serial\n  return null;\n}\nconst iso = d => d.toISOString().slice(0, 10);\n\n// ---------- 1. CLEANING ----------\nfunction cleanData(raw) {\n  const report = { rawRows: raw.length, duplicatesRemoved: 0, invalidRowsDropped: 0, missingNumbersSetToZero: 0, datesStandardised: 'Order Date and Ship Date converted to YYYY-MM-DD' };\n  const seen = new Set();\n  const rows = [];\n  for (const r of raw) {\n    const o = {};\n    for (const [k, v] of Object.entries(r)) o[str(k)] = typeof v === 'string' ? str(v).replace(/\\s+/g, ' ') : v;\n    const key = o['Row ID'] !== undefined && o['Row ID'] !== '' ? 'id:' + o['Row ID'] : JSON.stringify(o);\n    if (seen.has(key)) { report.duplicatesRemoved++; continue; }\n    seen.add(key);\n    const od = parseDate(o['Order Date']);\n    const sales = num(o['Sales']);\n    if (!od || !Number.isFinite(sales)) { report.invalidRowsDropped++; continue; }\n    const sd = parseDate(o['Ship Date']);\n    o['Order Date'] = iso(od);\n    o['Ship Date'] = sd ? iso(sd) : '';\n    o.Sales = sales;\n    for (const f of ['Profit', 'Quantity', 'Discount']) {\n      const n = num(o[f]);\n      if (!Number.isFinite(n)) report.missingNumbersSetToZero++;\n      o[f] = Number.isFinite(n) ? n : 0;\n    }\n    o['Postal Code'] = str(o['Postal Code']);\n    o.Year = od.getUTCFullYear();\n    o.Quarter = 'Q' + (Math.floor(od.getUTCMonth() / 3) + 1);\n    o.Month = MONTH_NAMES[od.getUTCMonth()];\n    o.YearMonth = o.Year + '-' + String(od.getUTCMonth() + 1).padStart(2, '0');\n    o['Ship Days'] = sd ? Math.round((sd - od) / 86400000) : null;\n    o._monthNum = od.getUTCMonth() + 1;\n    rows.push(o);\n  }\n  report.cleanRows = rows.length;\n  return { rows, report };\n}\n\n// ---------- 2. FIELD / METRIC RESOLUTION ----------\nconst FIELD_ALIASES = { product: 'Product Name', customer: 'Customer Name', date: 'Order Date', orderdate: 'Order Date', shipmode: 'Ship Mode', shippingmode: 'Ship Mode', subcategory: 'Sub-Category', zip: 'Postal Code', zipcode: 'Postal Code', shippingdays: 'Ship Days', month: 'Month', year: 'Year' };\nconst TIME_DIMS = new Set(['Year', 'Quarter', 'Month', 'YearMonth', 'Order Date', 'Ship Date']);\nconst NUMERIC_COLS = new Set(['Sales', 'Profit', 'Quantity', 'Discount', 'Year', 'Ship Days', 'Row ID']);\nconst DATE_COLS = new Set(['Order Date', 'Ship Date']);\n\nconst METRIC_ALIASES = {\n  sales: 'sales', revenue: 'sales', totalsales: 'sales', turnover: 'sales',\n  profit: 'profit', profits: 'profit', totalprofit: 'profit',\n  quantity: 'quantity', units: 'quantity', qty: 'quantity', unitssold: 'quantity',\n  orders: 'orders', ordercount: 'orders', distinctorders: 'orders',\n  customers: 'customers', customercount: 'customers', distinctcustomers: 'customers',\n  aov: 'aov', averageordervalue: 'aov', avgordervalue: 'aov',\n  margin: 'margin', profitmargin: 'margin', profitmarginpct: 'margin', marginpct: 'margin',\n  avgdiscount: 'avgDiscountPct', averagediscount: 'avgDiscountPct', discount: 'avgDiscountPct', avgdiscountpct: 'avgDiscountPct',\n  profitperunit: 'profitPerUnit', rows: 'rows', transactions: 'rows', lines: 'rows',\n  avgshipdays: 'avgShipDays', shippingdays: 'avgShipDays', avgshippingdays: 'avgShipDays',\n  lossrows: 'lossRows', lossmakinglines: 'lossRows'\n};\nconst normMetric = m => METRIC_ALIASES[norm(m)] || null;\nconst METRIC_LIST = ['sales', 'profit', 'quantity', 'orders', 'customers', 'aov', 'margin', 'avgDiscountPct', 'profitPerUnit', 'rows', 'avgShipDays', 'lossRows'];\n\nfunction fieldMap(sample) {\n  const m = {};\n  for (const k of Object.keys(sample || {})) if (!k.startsWith('_')) m[norm(k)] = k;\n  for (const [a, t] of Object.entries(FIELD_ALIASES)) if (m[norm(t)]) m[a] = m[norm(t)];\n  return m;\n}\n\nfunction newAcc() { return { sales: 0, profit: 0, qty: 0, disc: 0, rows: 0, orders: new Set(), cust: new Set(), shipSum: 0, shipN: 0, loss: 0 }; }\nfunction addAcc(a, r) {\n  a.sales += r.Sales; a.profit += r.Profit; a.qty += r.Quantity; a.disc += r.Discount; a.rows++;\n  if (r['Order ID']) a.orders.add(r['Order ID']);\n  if (r['Customer ID']) a.cust.add(r['Customer ID']);\n  if (r['Ship Days'] !== null && r['Ship Days'] !== undefined) { a.shipSum += r['Ship Days']; a.shipN++; }\n  if (r.Profit < 0) a.loss++;\n}\nfunction finishAcc(a, discScale) {\n  return {\n    sales: r2(a.sales), profit: r2(a.profit), quantity: a.qty, orders: a.orders.size, customers: a.cust.size,\n    aov: a.orders.size ? r2(a.sales / a.orders.size) : 0,\n    margin: a.sales ? r2(a.profit / a.sales * 100) : 0,\n    avgDiscountPct: a.rows ? r2(a.disc / a.rows * discScale) : 0,\n    profitPerUnit: a.qty ? r2(a.profit / a.qty) : 0,\n    rows: a.rows,\n    avgShipDays: a.shipN ? r2(a.shipSum / a.shipN) : null,\n    lossRows: a.loss\n  };\n}\n\n// ---------- 3. QUERY EXECUTION ----------\nfunction runQuery(rows, spec) {\n  try {\n    spec = (typeof spec === 'string') ? JSON.parse(spec) : (spec || {});\n  } catch (e) {\n    return { ok: false, error: 'query is not valid JSON: ' + e.message };\n  }\n  if (!rows.length) return { ok: false, error: 'No data rows available.' };\n  const fmap = fieldMap(rows[0]);\n  const validFields = Object.keys(rows[0]).filter(k => !k.startsWith('_'));\n  const resolve = f => fmap[norm(f)] || null;\n  const discScale = Math.max(...rows.map(r => r.Discount)) <= 1 ? 100 : 1;\n\n  let data = rows;\n  const applied = [];\n  for (const f of (spec.filters || [])) {\n    const col = resolve(f.field);\n    if (!col) return { ok: false, error: `Unknown filter field \"${f.field}\".`, validFields };\n    const op = norm(f.op || 'eq');\n    const isNum = NUMERIC_COLS.has(col);\n    const isDate = DATE_COLS.has(col);\n    const cv = v => isDate ? (parseDate(v) ? iso(parseDate(v)) : str(v)) : isNum ? num(v) : str(v).toLowerCase();\n    const val = f.value;\n    let test;\n    if (op === 'eq' || op === 'equals') test = x => cv(x) === cv(val);\n    else if (op === 'neq' || op === 'ne' || op === 'not') test = x => cv(x) !== cv(val);\n    else if (op === 'in') { const set = new Set([].concat(val).map(cv)); test = x => set.has(cv(x)); }\n    else if (op === 'nin' || op === 'notin') { const set = new Set([].concat(val).map(cv)); test = x => !set.has(cv(x)); }\n    else if (op === 'contains') test = x => str(x).toLowerCase().includes(str(val).toLowerCase());\n    else if (op === 'gt') test = x => cv(x) > cv(val);\n    else if (op === 'gte') test = x => cv(x) >= cv(val);\n    else if (op === 'lt') test = x => cv(x) < cv(val);\n    else if (op === 'lte') test = x => cv(x) <= cv(val);\n    else if (op === 'between') { const [a, b] = [].concat(val); test = x => cv(x) >= cv(a) && cv(x) <= cv(b); }\n    else return { ok: false, error: `Unknown filter op \"${f.op}\". Use eq, neq, in, nin, contains, gt, gte, lt, lte, between.` };\n    data = data.filter(r => r[col] !== null && r[col] !== undefined && test(r[col]));\n    applied.push(`${col} ${op} ${JSON.stringify(val)}`);\n  }\n\n  const metricsReq = (spec.metrics && spec.metrics.length ? [].concat(spec.metrics) : ['sales']).map(m => ({ raw: m, key: normMetric(m) }));\n  const badMetric = metricsReq.find(m => !m.key);\n  if (badMetric) return { ok: false, error: `Unknown metric \"${badMetric.raw}\".`, validMetrics: METRIC_LIST };\n  const metricKeys = metricsReq.map(m => m.key);\n\n  const dims = [];\n  for (const g of [].concat(spec.groupBy || []).slice(0, 2)) {\n    const col = resolve(g);\n    if (!col) return { ok: false, error: `Unknown groupBy field \"${g}\".`, validFields };\n    dims.push(col);\n  }\n\n  const total = newAcc();\n  for (const r of data) addAcc(total, r);\n  const totals = finishAcc(total, discScale);\n\n  let groups = [];\n  if (dims.length) {\n    const map = new Map();\n    for (const r of data) {\n      const parts = dims.map(d => { const v = r[d]; return v === '' || v === null || v === undefined ? 'Unknown' : String(v); });\n      const key = parts.join(' | ');\n      if (!map.has(key)) map.set(key, { parts, sortParts: dims.map(d => d === 'Month' ? r._monthNum : r[d]), acc: newAcc() });\n      addAcc(map.get(key).acc, r);\n    }\n    groups = [...map.entries()].map(([name, g]) => ({ name, parts: g.parts, _sort: g.sortParts, ...finishAcc(g.acc, discScale) }));\n\n    for (const h of (spec.having || [])) {\n      const mk = normMetric(h.metric);\n      if (!mk) return { ok: false, error: `Unknown having metric \"${h.metric}\".`, validMetrics: METRIC_LIST };\n      const op = norm(h.op), v = Number(h.value);\n      groups = groups.filter(g => op === 'gt' ? g[mk] > v : op === 'gte' ? g[mk] >= v : op === 'lt' ? g[mk] < v : op === 'lte' ? g[mk] <= v : op === 'eq' ? g[mk] === v : true);\n    }\n\n    const timeFirst = TIME_DIMS.has(dims[0]);\n    const sortKey = spec.sortBy ? normMetric(spec.sortBy) : null;\n    if (spec.sortBy && !sortKey) return { ok: false, error: `Unknown sortBy metric \"${spec.sortBy}\".`, validMetrics: METRIC_LIST };\n    if (timeFirst && !sortKey) {\n      const dir = norm(spec.order) === 'desc' ? -1 : 1;\n      groups.sort((a, b) => {\n        for (let i = 0; i < a._sort.length; i++) {\n          if (a._sort[i] < b._sort[i]) return -1 * dir;\n          if (a._sort[i] > b._sort[i]) return 1 * dir;\n        }\n        return 0;\n      });\n    } else {\n      const k = sortKey || metricKeys[0];\n      const dir = norm(spec.order) === 'asc' ? 1 : -1;\n      groups.sort((a, b) => ((a[k] ?? 0) - (b[k] ?? 0)) * dir);\n    }\n  }\n\n  const groupCount = groups.length;\n  const defLimit = dims.length && TIME_DIMS.has(dims[0]) ? 60 : 25;\n  const limit = Math.min(Number(spec.limit) || defLimit, 200);\n  groups = groups.slice(0, limit);\n\n  // Return only the requested metrics (plus the sort metric) to keep the LLM context small.\n  const keep = new Set([...metricKeys, ...(spec.sortBy && normMetric(spec.sortBy) ? [normMetric(spec.sortBy)] : [])]);\n  groups = groups.map(g => {\n    const o = { name: g.name, parts: g.parts };\n    for (const k of METRIC_LIST) if (keep.has(k)) o[k] = g[k];\n    return o;\n  });\n\n  return {\n    ok: true,\n    filtersApplied: applied,\n    rowsMatched: data.length,\n    totals,\n    groupBy: dims,\n    groupCount,\n    returned: groups.length,\n    groups,\n    warning: data.length === 0 ? 'No rows matched the filters. Check exact values in the dataset profile.' : undefined\n  };\n}\n\n// ---------- 4. DATASET PROFILE (given to the AI agent) ----------\nfunction buildProfile(rows, report) {\n  const acc = newAcc();\n  for (const r of rows) addAcc(acc, r);\n  const dates = rows.map(r => r['Order Date']).sort();\n  const distinct = f => [...new Set(rows.map(r => r[f]).filter(v => v !== '' && v !== null && v !== undefined))];\n  const small = {};\n  for (const f of ['Category', 'Sub-Category', 'Region', 'Segment', 'Ship Mode', 'Year', 'Quarter', 'Country']) small[f] = distinct(f).sort();\n  const maxDisc = Math.max(...rows.map(r => r.Discount));\n  return {\n    cleaning: report,\n    columns: Object.keys(rows[0] || {}).filter(k => !k.startsWith('_')),\n    derivedFields: ['Year', 'Quarter', 'Month', 'YearMonth', 'Ship Days'],\n    orderDateRange: { from: dates[0], to: dates[dates.length - 1] },\n    overall: finishAcc(acc, maxDisc <= 1 ? 100 : 1),\n    discountScale: maxDisc <= 1 ? 'fraction (0.20 = 20%) - filter values use fractions; metric avgDiscountPct is already a percentage' : 'percentage points',\n    exactValues: small,\n    states: distinct('State').sort(),\n    highCardinality: { products: distinct('Product Name').length, customers: distinct('Customer ID').length, cities: distinct('City').length }\n  };\n}\n// =================== END VELORA ENGINE ===================\n\n// ---- Tool executor (sub-workflow) ----\nlet query = '';\ntry { query = $('When Executed by Another Workflow').first().json.query; } catch (e) {}\nconst raw = $input.all().map(i => i.json);\nconst { rows } = cleanData(raw);\nconst result = runQuery(rows, query);\nif (result.ok) {\n  // strip internal helper keys and keep tool output compact for the LLM\n  result.groups = result.groups.map(g => { const o = { ...g }; delete o.parts; return o; });\n}\nreturn [{ json: result }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "id": "157f1cfd-daf0-45f9-9048-77cbea09d8e4",
+      "name": "Run query"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Get row(s) in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get row(s) in sheet": {
+      "main": [
+        [
+          {
+            "node": "Run query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "f316710a-68c2-48ee-8b38-26f9d3139d25",
+  "meta": {
+    "instanceId": "0b73164dac9e8bb260e0da38d66a60d7a36ee94bd3529325fe5971c59e8aee5d"
+  },
+  "nodeGroups": [],
+  "id": "1Ial1VQrtEWKqLWV",
+  "tags": []
+}

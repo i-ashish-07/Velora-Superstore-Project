@@ -1,0 +1,381 @@
+{
+  "name": "meow",
+  "nodes": [
+    {
+      "parameters": {
+        "public": true,
+        "initialMessages": "Hi there! 👋\nI am Datacart, your Velora data analyst. Ask me any business question about the Velora dataset and I will email you a full report with charts.",
+        "options": {}
+      },
+      "id": "cd210130-1feb-47f5-8eb2-8a70432bf8fa",
+      "name": "When chat message received",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.5,
+      "position": [
+        -192,
+        48
+      ],
+      "webhookId": "04ac02e7-d984-4b3d-87fc-04c522bbe332"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1unCC_QtuyjDm6We2aqewaLzijoyxv7g6_-uVJjBHPAQ",
+          "mode": "list",
+          "cachedResultName": "Velora_Superstore_Sample_2000",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1unCC_QtuyjDm6We2aqewaLzijoyxv7g6_-uVJjBHPAQ/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1107057720,
+          "mode": "list",
+          "cachedResultName": "Velora_Superstore_Sample_2000.csv",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1unCC_QtuyjDm6We2aqewaLzijoyxv7g6_-uVJjBHPAQ/edit#gid=1107057720"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        32,
+        48
+      ],
+      "id": "e2791bdb-9b10-4fcb-bcdd-f45b5be4f3fe",
+      "name": "Get row(s) in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "JquCQavbg08HlY1N",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===================== VELORA ENGINE (shared) =====================\nconst MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];\nconst str = v => String(v ?? '').trim();\nconst num = v => {\n  if (typeof v === 'number') return Number.isFinite(v) ? v : NaN;\n  const s = str(v).replace(/[$,%\\s]/g, '');\n  if (s === '') return NaN;\n  const n = Number(s);\n  return Number.isFinite(n) ? n : NaN;\n};\nconst norm = s => str(s).toLowerCase().replace(/[^a-z0-9]/g, '');\nconst r2 = n => Math.round((n + Number.EPSILON) * 100) / 100;\n\nfunction mkDate(y, m, d) {\n  const dt = new Date(Date.UTC(y, m - 1, d));\n  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d ? dt : null;\n}\nfunction parseDate(v) {\n  if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v;\n  const s = str(v);\n  if (!s) return null;\n  let m = s.match(/^(\\d{4})[-/](\\d{1,2})[-/](\\d{1,2})/);\n  if (m) return mkDate(+m[1], +m[2], +m[3]);\n  m = s.match(/^(\\d{1,2})[-/](\\d{1,2})[-/](\\d{4}|\\d{2})(?!\\d)/);\n  if (m) {\n    let y = +m[3];\n    if (y < 100) y += y >= 70 ? 1900 : 2000;\n    // US month/day/year; if that is impossible (day > 12 in month slot) try day/month\n    return mkDate(y, +m[1], +m[2]) || mkDate(y, +m[2], +m[1]);\n  }\n  if (/^\\d{5}$/.test(s)) return new Date(Date.UTC(1899, 11, 30) + Number(s) * 86400000); // Sheets serial\n  return null;\n}\nconst iso = d => d.toISOString().slice(0, 10);\n\n// ---------- 1. CLEANING ----------\nfunction cleanData(raw) {\n  const report = { rawRows: raw.length, duplicatesRemoved: 0, invalidRowsDropped: 0, missingNumbersSetToZero: 0, datesStandardised: 'Order Date and Ship Date converted to YYYY-MM-DD' };\n  const seen = new Set();\n  const rows = [];\n  for (const r of raw) {\n    const o = {};\n    for (const [k, v] of Object.entries(r)) o[str(k)] = typeof v === 'string' ? str(v).replace(/\\s+/g, ' ') : v;\n    const key = o['Row ID'] !== undefined && o['Row ID'] !== '' ? 'id:' + o['Row ID'] : JSON.stringify(o);\n    if (seen.has(key)) { report.duplicatesRemoved++; continue; }\n    seen.add(key);\n    const od = parseDate(o['Order Date']);\n    const sales = num(o['Sales']);\n    if (!od || !Number.isFinite(sales)) { report.invalidRowsDropped++; continue; }\n    const sd = parseDate(o['Ship Date']);\n    o['Order Date'] = iso(od);\n    o['Ship Date'] = sd ? iso(sd) : '';\n    o.Sales = sales;\n    for (const f of ['Profit', 'Quantity', 'Discount']) {\n      const n = num(o[f]);\n      if (!Number.isFinite(n)) report.missingNumbersSetToZero++;\n      o[f] = Number.isFinite(n) ? n : 0;\n    }\n    o['Postal Code'] = str(o['Postal Code']);\n    o.Year = od.getUTCFullYear();\n    o.Quarter = 'Q' + (Math.floor(od.getUTCMonth() / 3) + 1);\n    o.Month = MONTH_NAMES[od.getUTCMonth()];\n    o.YearMonth = o.Year + '-' + String(od.getUTCMonth() + 1).padStart(2, '0');\n    o['Ship Days'] = sd ? Math.round((sd - od) / 86400000) : null;\n    o._monthNum = od.getUTCMonth() + 1;\n    rows.push(o);\n  }\n  report.cleanRows = rows.length;\n  return { rows, report };\n}\n\n// ---------- 2. FIELD / METRIC RESOLUTION ----------\nconst FIELD_ALIASES = { product: 'Product Name', customer: 'Customer Name', date: 'Order Date', orderdate: 'Order Date', shipmode: 'Ship Mode', shippingmode: 'Ship Mode', subcategory: 'Sub-Category', zip: 'Postal Code', zipcode: 'Postal Code', shippingdays: 'Ship Days', month: 'Month', year: 'Year' };\nconst TIME_DIMS = new Set(['Year', 'Quarter', 'Month', 'YearMonth', 'Order Date', 'Ship Date']);\nconst NUMERIC_COLS = new Set(['Sales', 'Profit', 'Quantity', 'Discount', 'Year', 'Ship Days', 'Row ID']);\nconst DATE_COLS = new Set(['Order Date', 'Ship Date']);\n\nconst METRIC_ALIASES = {\n  sales: 'sales', revenue: 'sales', totalsales: 'sales', turnover: 'sales',\n  profit: 'profit', profits: 'profit', totalprofit: 'profit',\n  quantity: 'quantity', units: 'quantity', qty: 'quantity', unitssold: 'quantity',\n  orders: 'orders', ordercount: 'orders', distinctorders: 'orders',\n  customers: 'customers', customercount: 'customers', distinctcustomers: 'customers',\n  aov: 'aov', averageordervalue: 'aov', avgordervalue: 'aov',\n  margin: 'margin', profitmargin: 'margin', profitmarginpct: 'margin', marginpct: 'margin',\n  avgdiscount: 'avgDiscountPct', averagediscount: 'avgDiscountPct', discount: 'avgDiscountPct', avgdiscountpct: 'avgDiscountPct',\n  profitperunit: 'profitPerUnit', rows: 'rows', transactions: 'rows', lines: 'rows',\n  avgshipdays: 'avgShipDays', shippingdays: 'avgShipDays', avgshippingdays: 'avgShipDays',\n  lossrows: 'lossRows', lossmakinglines: 'lossRows'\n};\nconst normMetric = m => METRIC_ALIASES[norm(m)] || null;\nconst METRIC_LIST = ['sales', 'profit', 'quantity', 'orders', 'customers', 'aov', 'margin', 'avgDiscountPct', 'profitPerUnit', 'rows', 'avgShipDays', 'lossRows'];\n\nfunction fieldMap(sample) {\n  const m = {};\n  for (const k of Object.keys(sample || {})) if (!k.startsWith('_')) m[norm(k)] = k;\n  for (const [a, t] of Object.entries(FIELD_ALIASES)) if (m[norm(t)]) m[a] = m[norm(t)];\n  return m;\n}\n\nfunction newAcc() { return { sales: 0, profit: 0, qty: 0, disc: 0, rows: 0, orders: new Set(), cust: new Set(), shipSum: 0, shipN: 0, loss: 0 }; }\nfunction addAcc(a, r) {\n  a.sales += r.Sales; a.profit += r.Profit; a.qty += r.Quantity; a.disc += r.Discount; a.rows++;\n  if (r['Order ID']) a.orders.add(r['Order ID']);\n  if (r['Customer ID']) a.cust.add(r['Customer ID']);\n  if (r['Ship Days'] !== null && r['Ship Days'] !== undefined) { a.shipSum += r['Ship Days']; a.shipN++; }\n  if (r.Profit < 0) a.loss++;\n}\nfunction finishAcc(a, discScale) {\n  return {\n    sales: r2(a.sales), profit: r2(a.profit), quantity: a.qty, orders: a.orders.size, customers: a.cust.size,\n    aov: a.orders.size ? r2(a.sales / a.orders.size) : 0,\n    margin: a.sales ? r2(a.profit / a.sales * 100) : 0,\n    avgDiscountPct: a.rows ? r2(a.disc / a.rows * discScale) : 0,\n    profitPerUnit: a.qty ? r2(a.profit / a.qty) : 0,\n    rows: a.rows,\n    avgShipDays: a.shipN ? r2(a.shipSum / a.shipN) : null,\n    lossRows: a.loss\n  };\n}\n\n// ---------- 3. QUERY EXECUTION ----------\nfunction runQuery(rows, spec) {\n  try {\n    spec = (typeof spec === 'string') ? JSON.parse(spec) : (spec || {});\n  } catch (e) {\n    return { ok: false, error: 'query is not valid JSON: ' + e.message };\n  }\n  if (!rows.length) return { ok: false, error: 'No data rows available.' };\n  const fmap = fieldMap(rows[0]);\n  const validFields = Object.keys(rows[0]).filter(k => !k.startsWith('_'));\n  const resolve = f => fmap[norm(f)] || null;\n  const discScale = Math.max(...rows.map(r => r.Discount)) <= 1 ? 100 : 1;\n\n  let data = rows;\n  const applied = [];\n  for (const f of (spec.filters || [])) {\n    const col = resolve(f.field);\n    if (!col) return { ok: false, error: `Unknown filter field \"${f.field}\".`, validFields };\n    const op = norm(f.op || 'eq');\n    const isNum = NUMERIC_COLS.has(col);\n    const isDate = DATE_COLS.has(col);\n    const cv = v => isDate ? (parseDate(v) ? iso(parseDate(v)) : str(v)) : isNum ? num(v) : str(v).toLowerCase();\n    const val = f.value;\n    let test;\n    if (op === 'eq' || op === 'equals') test = x => cv(x) === cv(val);\n    else if (op === 'neq' || op === 'ne' || op === 'not') test = x => cv(x) !== cv(val);\n    else if (op === 'in') { const set = new Set([].concat(val).map(cv)); test = x => set.has(cv(x)); }\n    else if (op === 'nin' || op === 'notin') { const set = new Set([].concat(val).map(cv)); test = x => !set.has(cv(x)); }\n    else if (op === 'contains') test = x => str(x).toLowerCase().includes(str(val).toLowerCase());\n    else if (op === 'gt') test = x => cv(x) > cv(val);\n    else if (op === 'gte') test = x => cv(x) >= cv(val);\n    else if (op === 'lt') test = x => cv(x) < cv(val);\n    else if (op === 'lte') test = x => cv(x) <= cv(val);\n    else if (op === 'between') { const [a, b] = [].concat(val); test = x => cv(x) >= cv(a) && cv(x) <= cv(b); }\n    else return { ok: false, error: `Unknown filter op \"${f.op}\". Use eq, neq, in, nin, contains, gt, gte, lt, lte, between.` };\n    data = data.filter(r => r[col] !== null && r[col] !== undefined && test(r[col]));\n    applied.push(`${col} ${op} ${JSON.stringify(val)}`);\n  }\n\n  const metricsReq = (spec.metrics && spec.metrics.length ? [].concat(spec.metrics) : ['sales']).map(m => ({ raw: m, key: normMetric(m) }));\n  const badMetric = metricsReq.find(m => !m.key);\n  if (badMetric) return { ok: false, error: `Unknown metric \"${badMetric.raw}\".`, validMetrics: METRIC_LIST };\n  const metricKeys = metricsReq.map(m => m.key);\n\n  const dims = [];\n  for (const g of [].concat(spec.groupBy || []).slice(0, 2)) {\n    const col = resolve(g);\n    if (!col) return { ok: false, error: `Unknown groupBy field \"${g}\".`, validFields };\n    dims.push(col);\n  }\n\n  const total = newAcc();\n  for (const r of data) addAcc(total, r);\n  const totals = finishAcc(total, discScale);\n\n  let groups = [];\n  if (dims.length) {\n    const map = new Map();\n    for (const r of data) {\n      const parts = dims.map(d => { const v = r[d]; return v === '' || v === null || v === undefined ? 'Unknown' : String(v); });\n      const key = parts.join(' | ');\n      if (!map.has(key)) map.set(key, { parts, sortParts: dims.map(d => d === 'Month' ? r._monthNum : r[d]), acc: newAcc() });\n      addAcc(map.get(key).acc, r);\n    }\n    groups = [...map.entries()].map(([name, g]) => ({ name, parts: g.parts, _sort: g.sortParts, ...finishAcc(g.acc, discScale) }));\n\n    for (const h of (spec.having || [])) {\n      const mk = normMetric(h.metric);\n      if (!mk) return { ok: false, error: `Unknown having metric \"${h.metric}\".`, validMetrics: METRIC_LIST };\n      const op = norm(h.op), v = Number(h.value);\n      groups = groups.filter(g => op === 'gt' ? g[mk] > v : op === 'gte' ? g[mk] >= v : op === 'lt' ? g[mk] < v : op === 'lte' ? g[mk] <= v : op === 'eq' ? g[mk] === v : true);\n    }\n\n    const timeFirst = TIME_DIMS.has(dims[0]);\n    const sortKey = spec.sortBy ? normMetric(spec.sortBy) : null;\n    if (spec.sortBy && !sortKey) return { ok: false, error: `Unknown sortBy metric \"${spec.sortBy}\".`, validMetrics: METRIC_LIST };\n    if (timeFirst && !sortKey) {\n      const dir = norm(spec.order) === 'desc' ? -1 : 1;\n      groups.sort((a, b) => {\n        for (let i = 0; i < a._sort.length; i++) {\n          if (a._sort[i] < b._sort[i]) return -1 * dir;\n          if (a._sort[i] > b._sort[i]) return 1 * dir;\n        }\n        return 0;\n      });\n    } else {\n      const k = sortKey || metricKeys[0];\n      const dir = norm(spec.order) === 'asc' ? 1 : -1;\n      groups.sort((a, b) => ((a[k] ?? 0) - (b[k] ?? 0)) * dir);\n    }\n  }\n\n  const groupCount = groups.length;\n  const defLimit = dims.length && TIME_DIMS.has(dims[0]) ? 60 : 25;\n  const limit = Math.min(Number(spec.limit) || defLimit, 200);\n  groups = groups.slice(0, limit);\n\n  // Return only the requested metrics (plus the sort metric) to keep the LLM context small.\n  const keep = new Set([...metricKeys, ...(spec.sortBy && normMetric(spec.sortBy) ? [normMetric(spec.sortBy)] : [])]);\n  groups = groups.map(g => {\n    const o = { name: g.name, parts: g.parts };\n    for (const k of METRIC_LIST) if (keep.has(k)) o[k] = g[k];\n    return o;\n  });\n\n  return {\n    ok: true,\n    filtersApplied: applied,\n    rowsMatched: data.length,\n    totals,\n    groupBy: dims,\n    groupCount,\n    returned: groups.length,\n    groups,\n    warning: data.length === 0 ? 'No rows matched the filters. Check exact values in the dataset profile.' : undefined\n  };\n}\n\n// ---------- 4. DATASET PROFILE (given to the AI agent) ----------\nfunction buildProfile(rows, report) {\n  const acc = newAcc();\n  for (const r of rows) addAcc(acc, r);\n  const dates = rows.map(r => r['Order Date']).sort();\n  const distinct = f => [...new Set(rows.map(r => r[f]).filter(v => v !== '' && v !== null && v !== undefined))];\n  const small = {};\n  for (const f of ['Category', 'Sub-Category', 'Region', 'Segment', 'Ship Mode', 'Year', 'Quarter', 'Country']) small[f] = distinct(f).sort();\n  const maxDisc = Math.max(...rows.map(r => r.Discount));\n  return {\n    cleaning: report,\n    columns: Object.keys(rows[0] || {}).filter(k => !k.startsWith('_')),\n    derivedFields: ['Year', 'Quarter', 'Month', 'YearMonth', 'Ship Days'],\n    orderDateRange: { from: dates[0], to: dates[dates.length - 1] },\n    overall: finishAcc(acc, maxDisc <= 1 ? 100 : 1),\n    discountScale: maxDisc <= 1 ? 'fraction (0.20 = 20%) - filter values use fractions; metric avgDiscountPct is already a percentage' : 'percentage points',\n    exactValues: small,\n    states: distinct('State').sort(),\n    highCardinality: { products: distinct('Product Name').length, customers: distinct('Customer ID').length, cities: distinct('City').length }\n  };\n}\n// =================== END VELORA ENGINE ===================\n\n// ---- \"clean data\" node: clean the sheet and describe it for the AI agent ----\nconst raw = $input.all().map(i => i.json);\nconst { rows, report } = cleanData(raw);\nreturn [{ json: buildProfile(rows, report) }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        48
+      ],
+      "id": "34cf738c-db68-4850-baf5-3f00780bcd67",
+      "name": "clean data"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ 'USER QUESTION:\\n' + $('When chat message received').item.json.chatInput + '\\n\\nDATASET PROFILE (already cleaned):\\n' + JSON.stringify($json) + '\\n\\nREMINDER: first call query_velora_data with the queries you need, then reply with the JSON plan only.' }}",
+        "options": {
+          "systemMessage": "You are Datacart, the AI Data Analyst for Velora Superstore. Users ask ANY business question about the Velora sales dataset. You analyse the data yourself with your tool, then return a report plan as JSON. A separate system turns your plan into an HTML email with KPIs, charts and tables, so you never write HTML.\n\nDATA: every row is one order line (Order ID, dates, ship mode, customer, segment, city/state/region, product, category, sub-category, Sales, Quantity, Discount, Profit). The user message contains a DATASET PROFILE with the exact category / region / segment / ship-mode values, the date range and the discount scale. Use those exact spellings in filters.\n\nMANDATORY: you MUST call the query_velora_data tool at least once BEFORE writing your final JSON. The dataset profile only has overall totals, so any answer written without a tool call is wrong and will be rejected. Never skip the tool, even for simple questions.\n\nPROCESS\n1. Work out what the question needs: metric, filters, grouping, time period, ranking, comparison, or a diagnosis such as why profit is low.\n2. Call the tool ONCE with {\"queries\":[...]} holding every query you need (up to 8), because each call is slow. Only make a second call if the first results show you need something more. Typically include: the main answer query, an overall total for context, and one or two breakdowns that explain it (by category, region, segment, discount level, time). Questions about causes deserve extra queries, for example profit by discount level, or profit by sub-category within the region.\n3. Use ONLY numbers returned by the tool. Never estimate or recall figures. If a query returns ok:false, fix it and retry.\n4. Do not ask clarifying questions, because the answer is emailed automatically. Make a sensible assumption and state it in \"assumptions\". Examples: \"this year\" or \"latest year\" means the last year in the profile's date range; \"best\" means highest profit unless the user says sales.\n5. Rank by the metric the user names. Profit and sales are different metrics. Margin is profit divided by sales.\n6. WRITE THE ANSWER ONLY AFTER YOU HAVE THE TOOL RESULTS. \"direct_answer\" must state the actual result with real names and numbers, in plain statements. Good: \"<Name> is the only loss-making category: profit is -$<amount> on $<amount> sales (a <x>% margin).\" with the real values from the tool Bad: \"This report will identify which categories are in loss.\" Never describe what the report will do. If no group matches (for example nothing is losing money), say that clearly with the numbers. Every item in \"key_findings\" must contain at least one number taken from the tool results.\n7. Separate facts from hypotheses. Say \"possible explanation\" for anything the data does not prove.\n\nOUTPUT: reply with ONE JSON object and nothing else (no markdown fences, no text before or after, double quotes, no trailing commas):\n{\n  \"answerable\": true,\n  \"title\": \"short report title\",\n  \"direct_answer\": \"1-3 sentences answering the exact question with the key numbers, money as $12,345.67\",\n  \"key_findings\": [\"3-6 findings, each backed by tool numbers\"],\n  \"recommendations\": [\"2-4 practical next steps supported by the evidence\"],\n  \"assumptions\": [\"any interpretation you made\"],\n  \"scope_filters\": [ {\"field\":\"Year\",\"op\":\"eq\",\"value\":2017} ],\n  \"answer_query\": { ...the ONE tool query that directly answers the question, with \"metrics\" ... },\n  \"tables\": [ {\"title\":\"...\", \"query\": { ...same format as the tool query... }} ],\n  \"charts\": [ {\"title\":\"...\", \"type\":\"horizontalBar\", \"query\": { ...tool query format... }} ]\n}\n- answer_query: the single query whose result IS the answer (for example groupBy Category with metrics [\"profit\",\"sales\"] for \"which category is in loss\"). The system re-runs it and prints the exact numbers at the top of the report.\n- scope_filters: the filters that define the question's scope (the report's KPI cards are computed from them). Use [] for the whole dataset.\n- tables: 1-3 tables. charts: 2-4 charts that best explain the answer. Every \"query\" is RE-EXECUTED by the system on the real data, so it must be a valid tool query (an object, not a string) that includes \"metrics\". The chart is drawn from that query's result.\n- Chart types: \"horizontalBar\" for rankings and top/bottom N (limit 15 or fewer); \"bar\" for comparing a few categories or two metrics side by side (metrics: [\"sales\",\"profit\"]); \"line\" for trends over time (groupBy Month, Quarter, YearMonth or Year, sorted chronologically, which is the default); \"doughnut\" or \"pie\" for share of total with 6 or fewer parts, one metric, positive values only.\n- Charts should visualise the same thing your direct_answer talks about, plus supporting context.\n- If the question is NOT about the Velora data (for example general knowledge, or data the dataset does not have such as returns, costs or ad spend), return {\"answerable\": false, \"direct_answer\": \"polite explanation of what the dataset can answer\"}.",
+          "maxIterations": 12
+        }
+      },
+      "id": "4655cac4-a36d-44d0-934b-e6d226fcabcc",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        416,
+        48
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-5-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "id": "efd55a96-f6f8-44ef-944d-1612fce5dc0e",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        272,
+        256
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": null,
+          "name": "",
+          "__aiGatewayManaged": true
+        }
+      }
+    },
+    {
+      "parameters": {
+        "contextWindowLength": 10
+      },
+      "id": "7a533347-1d23-4802-b726-5534324940b4",
+      "name": "Simple Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.4,
+      "position": [
+        432,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "description": "Runs an analysis query on the cleaned Velora transaction data and returns exact calculated numbers. Call it as many times as needed (rankings, totals, breakdowns, trends, comparisons). Never calculate numbers yourself.\n\nInput `query` is a JSON STRING (double-quoted keys). All keys are optional:\n- filters: [{\"field\": <column>, \"op\": \"eq|neq|in|nin|contains|gt|gte|lt|lte|between\", \"value\": <value or array>}]\n- groupBy: up to 2 fields, e.g. [\"Category\"] or [\"Year\",\"Region\"]\n- metrics: any of sales, profit, quantity, orders, customers, aov, margin, avgDiscount, profitPerUnit, rows, avgShipDays, lossRows\n- sortBy: a metric name. order: \"desc\" (default) or \"asc\". limit: number of groups (default 25, max 200)\n- having: [{\"metric\":\"profit\",\"op\":\"lt\",\"value\":0}] keeps only groups that pass, after aggregation\n\nFields: Order Date, Ship Date, Ship Mode, Customer ID, Customer Name, Segment, Country, City, State, Postal Code, Region, Product ID, Category, Sub-Category, Product Name, Sales, Quantity, Discount, Profit, plus derived Year, Quarter (Q1-Q4), Month (January..December), YearMonth (e.g. 2016-11), Ship Days.\nFor whole years/months/quarters filter on Year / Month / Quarter. For custom ranges use Order Date with YYYY-MM-DD, e.g. {\"field\":\"Order Date\",\"op\":\"between\",\"value\":[\"2016-01-01\",\"2016-03-31\"]}. For partial product names use op contains.\n\nExamples:\nTop 10 products by profit: {\"groupBy\":[\"Product Name\"],\"metrics\":[\"profit\",\"sales\"],\"sortBy\":\"profit\",\"limit\":10}\nMonthly sales and profit in 2017: {\"filters\":[{\"field\":\"Year\",\"op\":\"eq\",\"value\":2017}],\"groupBy\":[\"Month\"],\"metrics\":[\"sales\",\"profit\"]}\n5 worst sub-categories by margin in the West: {\"filters\":[{\"field\":\"Region\",\"op\":\"eq\",\"value\":\"West\"}],\"groupBy\":[\"Sub-Category\"],\"metrics\":[\"margin\",\"sales\"],\"sortBy\":\"margin\",\"order\":\"asc\",\"limit\":5}\nStates losing money: {\"groupBy\":[\"State\"],\"metrics\":[\"profit\"],\"having\":[{\"metric\":\"profit\",\"op\":\"lt\",\"value\":0}],\"sortBy\":\"profit\",\"order\":\"asc\"}\nOverall totals for a filter: omit groupBy.\n\nReturns {ok, rowsMatched, totals (all metrics for the matching rows), groups [{name, ...metrics}], groupCount, error}. If ok is false, read the error and fix the query.",
+        "workflowId": {
+          "__rl": true,
+          "value": "1Ial1VQrtEWKqLWV",
+          "mode": "id",
+          "cachedResultUrl": "/workflow/1Ial1VQrtEWKqLWV"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [
+            "query"
+          ],
+          "schema": [
+            {
+              "id": "query",
+              "displayName": "query",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        576,
+        256
+      ],
+      "id": "9c3119c0-f2b9-4150-b398-f14ce29a0efb",
+      "name": "query_velora_data"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===================== VELORA ENGINE (shared) =====================\nconst MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];\nconst str = v => String(v ?? '').trim();\nconst num = v => {\n  if (typeof v === 'number') return Number.isFinite(v) ? v : NaN;\n  const s = str(v).replace(/[$,%\\s]/g, '');\n  if (s === '') return NaN;\n  const n = Number(s);\n  return Number.isFinite(n) ? n : NaN;\n};\nconst norm = s => str(s).toLowerCase().replace(/[^a-z0-9]/g, '');\nconst r2 = n => Math.round((n + Number.EPSILON) * 100) / 100;\n\nfunction mkDate(y, m, d) {\n  const dt = new Date(Date.UTC(y, m - 1, d));\n  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d ? dt : null;\n}\nfunction parseDate(v) {\n  if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v;\n  const s = str(v);\n  if (!s) return null;\n  let m = s.match(/^(\\d{4})[-/](\\d{1,2})[-/](\\d{1,2})/);\n  if (m) return mkDate(+m[1], +m[2], +m[3]);\n  m = s.match(/^(\\d{1,2})[-/](\\d{1,2})[-/](\\d{4}|\\d{2})(?!\\d)/);\n  if (m) {\n    let y = +m[3];\n    if (y < 100) y += y >= 70 ? 1900 : 2000;\n    // US month/day/year; if that is impossible (day > 12 in month slot) try day/month\n    return mkDate(y, +m[1], +m[2]) || mkDate(y, +m[2], +m[1]);\n  }\n  if (/^\\d{5}$/.test(s)) return new Date(Date.UTC(1899, 11, 30) + Number(s) * 86400000); // Sheets serial\n  return null;\n}\nconst iso = d => d.toISOString().slice(0, 10);\n\n// ---------- 1. CLEANING ----------\nfunction cleanData(raw) {\n  const report = { rawRows: raw.length, duplicatesRemoved: 0, invalidRowsDropped: 0, missingNumbersSetToZero: 0, datesStandardised: 'Order Date and Ship Date converted to YYYY-MM-DD' };\n  const seen = new Set();\n  const rows = [];\n  for (const r of raw) {\n    const o = {};\n    for (const [k, v] of Object.entries(r)) o[str(k)] = typeof v === 'string' ? str(v).replace(/\\s+/g, ' ') : v;\n    const key = o['Row ID'] !== undefined && o['Row ID'] !== '' ? 'id:' + o['Row ID'] : JSON.stringify(o);\n    if (seen.has(key)) { report.duplicatesRemoved++; continue; }\n    seen.add(key);\n    const od = parseDate(o['Order Date']);\n    const sales = num(o['Sales']);\n    if (!od || !Number.isFinite(sales)) { report.invalidRowsDropped++; continue; }\n    const sd = parseDate(o['Ship Date']);\n    o['Order Date'] = iso(od);\n    o['Ship Date'] = sd ? iso(sd) : '';\n    o.Sales = sales;\n    for (const f of ['Profit', 'Quantity', 'Discount']) {\n      const n = num(o[f]);\n      if (!Number.isFinite(n)) report.missingNumbersSetToZero++;\n      o[f] = Number.isFinite(n) ? n : 0;\n    }\n    o['Postal Code'] = str(o['Postal Code']);\n    o.Year = od.getUTCFullYear();\n    o.Quarter = 'Q' + (Math.floor(od.getUTCMonth() / 3) + 1);\n    o.Month = MONTH_NAMES[od.getUTCMonth()];\n    o.YearMonth = o.Year + '-' + String(od.getUTCMonth() + 1).padStart(2, '0');\n    o['Ship Days'] = sd ? Math.round((sd - od) / 86400000) : null;\n    o._monthNum = od.getUTCMonth() + 1;\n    rows.push(o);\n  }\n  report.cleanRows = rows.length;\n  return { rows, report };\n}\n\n// ---------- 2. FIELD / METRIC RESOLUTION ----------\nconst FIELD_ALIASES = { product: 'Product Name', customer: 'Customer Name', date: 'Order Date', orderdate: 'Order Date', shipmode: 'Ship Mode', shippingmode: 'Ship Mode', subcategory: 'Sub-Category', zip: 'Postal Code', zipcode: 'Postal Code', shippingdays: 'Ship Days', month: 'Month', year: 'Year' };\nconst TIME_DIMS = new Set(['Year', 'Quarter', 'Month', 'YearMonth', 'Order Date', 'Ship Date']);\nconst NUMERIC_COLS = new Set(['Sales', 'Profit', 'Quantity', 'Discount', 'Year', 'Ship Days', 'Row ID']);\nconst DATE_COLS = new Set(['Order Date', 'Ship Date']);\n\nconst METRIC_ALIASES = {\n  sales: 'sales', revenue: 'sales', totalsales: 'sales', turnover: 'sales',\n  profit: 'profit', profits: 'profit', totalprofit: 'profit',\n  quantity: 'quantity', units: 'quantity', qty: 'quantity', unitssold: 'quantity',\n  orders: 'orders', ordercount: 'orders', distinctorders: 'orders',\n  customers: 'customers', customercount: 'customers', distinctcustomers: 'customers',\n  aov: 'aov', averageordervalue: 'aov', avgordervalue: 'aov',\n  margin: 'margin', profitmargin: 'margin', profitmarginpct: 'margin', marginpct: 'margin',\n  avgdiscount: 'avgDiscountPct', averagediscount: 'avgDiscountPct', discount: 'avgDiscountPct', avgdiscountpct: 'avgDiscountPct',\n  profitperunit: 'profitPerUnit', rows: 'rows', transactions: 'rows', lines: 'rows',\n  avgshipdays: 'avgShipDays', shippingdays: 'avgShipDays', avgshippingdays: 'avgShipDays',\n  lossrows: 'lossRows', lossmakinglines: 'lossRows'\n};\nconst normMetric = m => METRIC_ALIASES[norm(m)] || null;\nconst METRIC_LIST = ['sales', 'profit', 'quantity', 'orders', 'customers', 'aov', 'margin', 'avgDiscountPct', 'profitPerUnit', 'rows', 'avgShipDays', 'lossRows'];\n\nfunction fieldMap(sample) {\n  const m = {};\n  for (const k of Object.keys(sample || {})) if (!k.startsWith('_')) m[norm(k)] = k;\n  for (const [a, t] of Object.entries(FIELD_ALIASES)) if (m[norm(t)]) m[a] = m[norm(t)];\n  return m;\n}\n\nfunction newAcc() { return { sales: 0, profit: 0, qty: 0, disc: 0, rows: 0, orders: new Set(), cust: new Set(), shipSum: 0, shipN: 0, loss: 0 }; }\nfunction addAcc(a, r) {\n  a.sales += r.Sales; a.profit += r.Profit; a.qty += r.Quantity; a.disc += r.Discount; a.rows++;\n  if (r['Order ID']) a.orders.add(r['Order ID']);\n  if (r['Customer ID']) a.cust.add(r['Customer ID']);\n  if (r['Ship Days'] !== null && r['Ship Days'] !== undefined) { a.shipSum += r['Ship Days']; a.shipN++; }\n  if (r.Profit < 0) a.loss++;\n}\nfunction finishAcc(a, discScale) {\n  return {\n    sales: r2(a.sales), profit: r2(a.profit), quantity: a.qty, orders: a.orders.size, customers: a.cust.size,\n    aov: a.orders.size ? r2(a.sales / a.orders.size) : 0,\n    margin: a.sales ? r2(a.profit / a.sales * 100) : 0,\n    avgDiscountPct: a.rows ? r2(a.disc / a.rows * discScale) : 0,\n    profitPerUnit: a.qty ? r2(a.profit / a.qty) : 0,\n    rows: a.rows,\n    avgShipDays: a.shipN ? r2(a.shipSum / a.shipN) : null,\n    lossRows: a.loss\n  };\n}\n\n// ---------- 3. QUERY EXECUTION ----------\nfunction runQuery(rows, spec) {\n  try {\n    spec = (typeof spec === 'string') ? JSON.parse(spec) : (spec || {});\n  } catch (e) {\n    return { ok: false, error: 'query is not valid JSON: ' + e.message };\n  }\n  if (!rows.length) return { ok: false, error: 'No data rows available.' };\n  const fmap = fieldMap(rows[0]);\n  const validFields = Object.keys(rows[0]).filter(k => !k.startsWith('_'));\n  const resolve = f => fmap[norm(f)] || null;\n  const discScale = Math.max(...rows.map(r => r.Discount)) <= 1 ? 100 : 1;\n\n  let data = rows;\n  const applied = [];\n  for (const f of (spec.filters || [])) {\n    const col = resolve(f.field);\n    if (!col) return { ok: false, error: `Unknown filter field \"${f.field}\".`, validFields };\n    const op = norm(f.op || 'eq');\n    const isNum = NUMERIC_COLS.has(col);\n    const isDate = DATE_COLS.has(col);\n    const cv = v => isDate ? (parseDate(v) ? iso(parseDate(v)) : str(v)) : isNum ? num(v) : str(v).toLowerCase();\n    const val = f.value;\n    let test;\n    if (op === 'eq' || op === 'equals') test = x => cv(x) === cv(val);\n    else if (op === 'neq' || op === 'ne' || op === 'not') test = x => cv(x) !== cv(val);\n    else if (op === 'in') { const set = new Set([].concat(val).map(cv)); test = x => set.has(cv(x)); }\n    else if (op === 'nin' || op === 'notin') { const set = new Set([].concat(val).map(cv)); test = x => !set.has(cv(x)); }\n    else if (op === 'contains') test = x => str(x).toLowerCase().includes(str(val).toLowerCase());\n    else if (op === 'gt') test = x => cv(x) > cv(val);\n    else if (op === 'gte') test = x => cv(x) >= cv(val);\n    else if (op === 'lt') test = x => cv(x) < cv(val);\n    else if (op === 'lte') test = x => cv(x) <= cv(val);\n    else if (op === 'between') { const [a, b] = [].concat(val); test = x => cv(x) >= cv(a) && cv(x) <= cv(b); }\n    else return { ok: false, error: `Unknown filter op \"${f.op}\". Use eq, neq, in, nin, contains, gt, gte, lt, lte, between.` };\n    data = data.filter(r => r[col] !== null && r[col] !== undefined && test(r[col]));\n    applied.push(`${col} ${op} ${JSON.stringify(val)}`);\n  }\n\n  const metricsReq = (spec.metrics && spec.metrics.length ? [].concat(spec.metrics) : ['sales']).map(m => ({ raw: m, key: normMetric(m) }));\n  const badMetric = metricsReq.find(m => !m.key);\n  if (badMetric) return { ok: false, error: `Unknown metric \"${badMetric.raw}\".`, validMetrics: METRIC_LIST };\n  const metricKeys = metricsReq.map(m => m.key);\n\n  const dims = [];\n  for (const g of [].concat(spec.groupBy || []).slice(0, 2)) {\n    const col = resolve(g);\n    if (!col) return { ok: false, error: `Unknown groupBy field \"${g}\".`, validFields };\n    dims.push(col);\n  }\n\n  const total = newAcc();\n  for (const r of data) addAcc(total, r);\n  const totals = finishAcc(total, discScale);\n\n  let groups = [];\n  if (dims.length) {\n    const map = new Map();\n    for (const r of data) {\n      const parts = dims.map(d => { const v = r[d]; return v === '' || v === null || v === undefined ? 'Unknown' : String(v); });\n      const key = parts.join(' | ');\n      if (!map.has(key)) map.set(key, { parts, sortParts: dims.map(d => d === 'Month' ? r._monthNum : r[d]), acc: newAcc() });\n      addAcc(map.get(key).acc, r);\n    }\n    groups = [...map.entries()].map(([name, g]) => ({ name, parts: g.parts, _sort: g.sortParts, ...finishAcc(g.acc, discScale) }));\n\n    for (const h of (spec.having || [])) {\n      const mk = normMetric(h.metric);\n      if (!mk) return { ok: false, error: `Unknown having metric \"${h.metric}\".`, validMetrics: METRIC_LIST };\n      const op = norm(h.op), v = Number(h.value);\n      groups = groups.filter(g => op === 'gt' ? g[mk] > v : op === 'gte' ? g[mk] >= v : op === 'lt' ? g[mk] < v : op === 'lte' ? g[mk] <= v : op === 'eq' ? g[mk] === v : true);\n    }\n\n    const timeFirst = TIME_DIMS.has(dims[0]);\n    const sortKey = spec.sortBy ? normMetric(spec.sortBy) : null;\n    if (spec.sortBy && !sortKey) return { ok: false, error: `Unknown sortBy metric \"${spec.sortBy}\".`, validMetrics: METRIC_LIST };\n    if (timeFirst && !sortKey) {\n      const dir = norm(spec.order) === 'desc' ? -1 : 1;\n      groups.sort((a, b) => {\n        for (let i = 0; i < a._sort.length; i++) {\n          if (a._sort[i] < b._sort[i]) return -1 * dir;\n          if (a._sort[i] > b._sort[i]) return 1 * dir;\n        }\n        return 0;\n      });\n    } else {\n      const k = sortKey || metricKeys[0];\n      const dir = norm(spec.order) === 'asc' ? 1 : -1;\n      groups.sort((a, b) => ((a[k] ?? 0) - (b[k] ?? 0)) * dir);\n    }\n  }\n\n  const groupCount = groups.length;\n  const defLimit = dims.length && TIME_DIMS.has(dims[0]) ? 60 : 25;\n  const limit = Math.min(Number(spec.limit) || defLimit, 200);\n  groups = groups.slice(0, limit);\n\n  // Return only the requested metrics (plus the sort metric) to keep the LLM context small.\n  const keep = new Set([...metricKeys, ...(spec.sortBy && normMetric(spec.sortBy) ? [normMetric(spec.sortBy)] : [])]);\n  groups = groups.map(g => {\n    const o = { name: g.name, parts: g.parts };\n    for (const k of METRIC_LIST) if (keep.has(k)) o[k] = g[k];\n    return o;\n  });\n\n  return {\n    ok: true,\n    filtersApplied: applied,\n    rowsMatched: data.length,\n    totals,\n    groupBy: dims,\n    groupCount,\n    returned: groups.length,\n    groups,\n    warning: data.length === 0 ? 'No rows matched the filters. Check exact values in the dataset profile.' : undefined\n  };\n}\n\n// ---------- 4. DATASET PROFILE (given to the AI agent) ----------\nfunction buildProfile(rows, report) {\n  const acc = newAcc();\n  for (const r of rows) addAcc(acc, r);\n  const dates = rows.map(r => r['Order Date']).sort();\n  const distinct = f => [...new Set(rows.map(r => r[f]).filter(v => v !== '' && v !== null && v !== undefined))];\n  const small = {};\n  for (const f of ['Category', 'Sub-Category', 'Region', 'Segment', 'Ship Mode', 'Year', 'Quarter', 'Country']) small[f] = distinct(f).sort();\n  const maxDisc = Math.max(...rows.map(r => r.Discount));\n  return {\n    cleaning: report,\n    columns: Object.keys(rows[0] || {}).filter(k => !k.startsWith('_')),\n    derivedFields: ['Year', 'Quarter', 'Month', 'YearMonth', 'Ship Days'],\n    orderDateRange: { from: dates[0], to: dates[dates.length - 1] },\n    overall: finishAcc(acc, maxDisc <= 1 ? 100 : 1),\n    discountScale: maxDisc <= 1 ? 'fraction (0.20 = 20%) - filter values use fractions; metric avgDiscountPct is already a percentage' : 'percentage points',\n    exactValues: small,\n    states: distinct('State').sort(),\n    highCardinality: { products: distinct('Product Name').length, customers: distinct('Customer ID').length, cities: distinct('City').length }\n  };\n}\n// =================== END VELORA ENGINE ===================\n\n// ===================== REPORT BUILDER (renders ANY agent plan) =====================\nconst esc = v => String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;').replace(/'/g,'&#39;');\nconst money = n => new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2}).format(Number(n)||0);\nconst fnum = n => new Intl.NumberFormat('en-US',{maximumFractionDigits:2}).format(Number(n)||0);\n\nconst METRIC_INFO = {\n  sales:{label:'Sales (USD)',kind:'money'}, profit:{label:'Profit (USD)',kind:'money'}, aov:{label:'Avg order value (USD)',kind:'money'},\n  profitPerUnit:{label:'Profit per unit (USD)',kind:'money'}, margin:{label:'Profit margin (%)',kind:'pct'},\n  avgDiscountPct:{label:'Avg discount (%)',kind:'pct'}, quantity:{label:'Quantity',kind:'num'}, orders:{label:'Orders',kind:'num'},\n  customers:{label:'Customers',kind:'num'}, rows:{label:'Order lines',kind:'num'}, avgShipDays:{label:'Avg ship days',kind:'num'}, lossRows:{label:'Loss-making lines',kind:'num'}\n};\nconst fmtVal = (v, kind) => v === null || v === undefined ? '—' : kind === 'money' ? money(v) : kind === 'pct' ? Number(v).toFixed(2) + '%' : fnum(v);\n\n// ---- Chart.js (QuickChart) helpers. Functions are stringified; they must NOT use outer variables. ----\nconst serialize = obj => JSON.stringify(obj, (k, v) => typeof v === 'function' ? '@@FN@@' + v.toString() + '@@FN@@' : v)\n  .replace(/\"@@FN@@[\\s\\S]*?@@FN@@\"/g, m => JSON.parse(m).slice(6, -6));\nconst chartUrl = config => 'https://quickchart.io/chart?width=1000&height=' + (config._h || 430) + '&devicePixelRatio=2&backgroundColor=white&format=png&c=' +\n  encodeURIComponent(serialize((delete config._h, config)));\nconst FMT = {\n  money: v => (Number(v) < 0 ? '-$' : '$') + Math.abs(Number(v)).toLocaleString('en-US', { maximumFractionDigits: 0 }),\n  pct:   v => Number(v).toFixed(1) + '%',\n  num:   v => Number(v).toLocaleString('en-US', { maximumFractionDigits: 1 })\n};\nconst NAVY = '#24476B', PALETTE = ['#24476B','#4FAF9D','#8DBCEB','#F2A65A','#9B72AA','#D97777','#7A8B99','#C9B458'];\nconst LIGHT = '#8DBCEB', RED = '#D97777', GRID = '#E6ECF2';\nconst shorten = (s, n) => s.length > n ? s.slice(0, n - 1) + '…' : s;\n\nfunction buildChart(spec, result) {\n  const type = ['bar','horizontalBar','line','pie','doughnut'].includes(spec.type) ? spec.type : 'bar';\n  const mkeys = (spec.query.metrics && spec.query.metrics.length ? [].concat(spec.query.metrics) : ['sales']).map(normMetric).filter(Boolean);\n  if (!mkeys.length) mkeys.push('sales');\n  const isTime = result.groupBy.length && TIME_DIMS.has(result.groupBy[0]);\n  const max = type === 'line' || isTime ? 60 : 15;\n  const groups = result.groups.slice(0, max);\n  if (!groups.length) return null;\n  const labels = groups.map(g => shorten(g.name, 42));\n  const kinds = new Set(mkeys.map(k => METRIC_INFO[k].kind));\n  const kind = kinds.size === 1 ? [...kinds][0] : 'num';\n  const title = spec.title || 'Chart';\n  const base = { title: { display: true, text: title, fontSize: 18, fontColor: NAVY }, legend: { display: mkeys.length > 1 || type === 'pie' || type === 'doughnut', position: type === 'pie' || type === 'doughnut' ? 'right' : 'top' } };\n\n  if (type === 'pie' || type === 'doughnut') {\n    const vals = groups.map(g => Math.max(0, g[mkeys[0]] || 0));\n    return chartUrl({ type, _h: 430, data: { labels, datasets: [{ data: vals, backgroundColor: PALETTE }] },\n      options: { ...base, plugins: { datalabels: { display: true, color: '#fff', font: { weight: 'bold' }, formatter: FMT[kind] } } } });\n  }\n\n  const datasets = mkeys.map((k, i) => {\n    const data = groups.map(g => g[k] ?? null);\n    const single = mkeys.length === 1;\n    const colour = PALETTE[i % PALETTE.length];\n    if (type === 'line') return { label: METRIC_INFO[k].label, data, borderColor: colour, backgroundColor: colour, borderWidth: 3, pointRadius: 3, fill: false, lineTension: 0.15 };\n    return { label: METRIC_INFO[k].label, data,\n      backgroundColor: single ? data.map(v => v < 0 ? RED : LIGHT) : colour,\n      borderColor: single ? data.map(v => v < 0 ? '#B94B4B' : '#6099CE') : colour, borderWidth: 1 };\n  });\n  const horizontal = type === 'horizontalBar';\n  const valueAxis = { scaleLabel: { display: true, labelString: spec.yLabel || (mkeys.length === 1 ? METRIC_INFO[mkeys[0]].label : 'Value') },\n    ticks: { beginAtZero: type !== 'line', callback: FMT[kind] }, gridLines: { color: GRID, zeroLineColor: '#526273', zeroLineWidth: 2 } };\n  const catAxis = { scaleLabel: { display: true, labelString: spec.xLabel || (result.groupBy[0] || '') }, gridLines: { display: false, color: GRID }, ticks: { autoSkip: false, maxRotation: horizontal ? 0 : 45 } };\n  const showLabels = type !== 'line' && groups.length <= 15;\n  return chartUrl({ type, _h: horizontal ? Math.max(380, 90 + groups.length * 36) : 430, data: { labels, datasets },\n    options: { ...base, layout: { padding: { right: horizontal ? 70 : 10 } },\n      scales: horizontal ? { xAxes: [valueAxis], yAxes: [catAxis] } : { xAxes: [catAxis], yAxes: [valueAxis] },\n      plugins: { datalabels: showLabels ? { display: true, anchor: 'end',\n        align: ctx => ctx.dataset.data[ctx.dataIndex] < 0 ? 'start' : 'end',\n        color: ctx => ctx.dataset.data[ctx.dataIndex] < 0 ? '#B42318' : '#24476B',\n        font: { size: 11 }, formatter: FMT[kind] } : { display: false } } } });\n}\n\nfunction buildTable(spec, result) {\n  const mkeys = (spec.query.metrics && spec.query.metrics.length ? [].concat(spec.query.metrics) : ['sales']).map(normMetric).filter(Boolean);\n  const dims = result.groupBy;\n  const th = s => `<th style=\"background:#24476B;color:#fff;text-align:left;padding:9px 10px;font-size:12px;\">${esc(s)}</th>`;\n  const thr = s => `<th style=\"background:#24476B;color:#fff;text-align:right;padding:9px 10px;font-size:12px;\">${esc(s)}</th>`;\n  let head = dims.map(th).join('') + mkeys.map(k => thr(METRIC_INFO[k].label)).join('');\n  let body = '';\n  if (dims.length) {\n    result.groups.forEach((g, i) => {\n      body += `<tr style=\"background:${i % 2 ? '#f7f9fc' : '#fff'}\">` + g.parts.map(p => `<td style=\"padding:8px 10px;border-bottom:1px solid #e5eaf0;\">${esc(p)}</td>`).join('') +\n        mkeys.map(k => `<td style=\"padding:8px 10px;border-bottom:1px solid #e5eaf0;text-align:right;${g[k] < 0 ? 'color:#c0392b;font-weight:700;' : ''}\">${fmtVal(g[k], METRIC_INFO[k].kind)}</td>`).join('') + '</tr>';\n    });\n  } else {\n    head = th('Scope') + mkeys.map(k => thr(METRIC_INFO[k].label)).join('');\n    body = `<tr><td style=\"padding:8px 10px;\">All matching rows</td>` + mkeys.map(k => `<td style=\"padding:8px 10px;text-align:right;\">${fmtVal(result.totals[k], METRIC_INFO[k].kind)}</td>`).join('') + '</tr>';\n  }\n  const note = result.groupCount > result.returned ? `<p style=\"font-size:11px;color:#64748b;margin:4px 0 0;\">Showing ${result.returned} of ${result.groupCount} groups.</p>` : '';\n  return `<div style=\"overflow-x:auto;\"><table style=\"width:100%;border-collapse:collapse;font-size:13px;\"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>${note}`;\n}\n\n// ---- Parse the agent's JSON plan robustly ----\nfunction extractText(out) {\n  if (typeof out === 'string') return out;\n  if (Array.isArray(out)) return out.flatMap(m => Array.isArray(m.content) ? m.content : [m]).map(c => c.text || '').join('\\n');\n  return out?.text || JSON.stringify(out || '');\n}\nfunction parsePlan(text) {\n  let t = String(text).trim().replace(/^```(?:json)?/i, '').replace(/```$/,'').trim();\n  try { return JSON.parse(t); } catch (e) {}\n  const a = t.indexOf('{'), b = t.lastIndexOf('}');\n  if (a >= 0 && b > a) { try { return JSON.parse(t.slice(a, b + 1)); } catch (e) {} }\n  return null;\n}\n\n// ---- Main ----\nconst question = String($('When chat message received').first().json.chatInput || '').trim();\nconst agentOut = $input.first().json.output;\nconst rawRows = $('Get row(s) in sheet').all().map(i => i.json);\nconst { rows, report: cleanReport } = cleanData(rawRows);\nconst plan = parsePlan(extractText(agentOut));\n\nif (!plan) {\n  const t = extractText(agentOut);\n  return [{ json: { question, sendEmail: false, chatReply: t || 'Sorry, I could not produce an analysis for that question.', html: '', subject: '' } }];\n}\nif (plan.answerable === false) {\n  return [{ json: { question, sendEmail: false, chatReply: plan.direct_answer || 'That question cannot be answered from the Velora dataset.', html: '', subject: '' } }];\n}\n\nconst list = x => Array.isArray(x) ? x.map(String).filter(Boolean) : (x ? [String(x)] : []);\nconst scope = runQuery(rows, { filters: Array.isArray(plan.scope_filters) ? plan.scope_filters : [] });\nconst T = scope.ok ? scope.totals : { sales: 0, profit: 0, orders: 0, margin: 0 };\nconst scopeText = scope.ok && scope.filtersApplied.length ? scope.filtersApplied.join(' · ') : 'All data (' + rows.length + ' cleaned transaction rows)';\n\nconst problems = [];\nlet tablesHtml = '', chartsHtml = '';\nfor (const t of (plan.tables || []).slice(0, 4)) {\n  const res = runQuery(rows, t.query);\n  if (!res.ok) { problems.push(`Table \"${t.title}\": ${res.error}`); continue; }\n  tablesHtml += `<h2 style=\"font-size:18px;color:#17324d;margin:26px 0 10px;border-bottom:1px solid #e5eaf0;padding-bottom:6px;\">${esc(t.title || 'Table')}</h2>${buildTable(t, res)}`;\n}\nfor (const c of (plan.charts || []).slice(0, 5)) {\n  const res = runQuery(rows, c.query);\n  if (!res.ok) { problems.push(`Chart \"${c.title}\": ${res.error}`); continue; }\n  const url = buildChart(c, res);\n  if (!url) { problems.push(`Chart \"${c.title}\": no data matched.`); continue; }\n  chartsHtml += `<img src=\"${url}\" alt=\"${esc(c.title)}\" style=\"display:block;width:100%;max-width:1000px;height:auto;border:1px solid #e5eaf0;border-radius:8px;margin:16px auto;\">`;\n}\n\n// ---- Data-driven answer (does not depend on the LLM's wording) ----\nlet autoLines = [], answerTable = '';\nconst aq = plan.answer_query || (plan.charts && plan.charts[0] && plan.charts[0].query) || (plan.tables && plan.tables[0] && plan.tables[0].query);\nif (aq && typeof aq === 'object') {\n  const ar = runQuery(rows, aq);\n  if (ar.ok) {\n    const mks = (aq.metrics && aq.metrics.length ? [].concat(aq.metrics) : ['sales']).map(normMetric).filter(Boolean);\n    const mk = mks[0] || 'sales', info = METRIC_INFO[mk], fmt = v => fmtVal(v, info.kind);\n    if (ar.groups.length) {\n      const full = runQuery(rows, { ...aq, limit: 200 });\n      autoLines.push(`${info.label} by ${ar.groupBy.join(' / ')}: ` + ar.groups.slice(0, 5).map(g => `${g.name} (${fmt(g[mk])})`).join(', ') + (ar.groupCount > 5 ? ` … (${ar.groupCount} groups in total)` : '') + '.');\n      if (['profit', 'margin', 'profitPerUnit'].includes(mk) && full.ok) {\n        const neg = full.groups.filter(g => g[mk] < 0).sort((a, b) => a[mk] - b[mk]);\n        autoLines.push(neg.length\n          ? `Loss-making (${neg.length} of ${full.groupCount}): ` + neg.slice(0, 8).map(g => `${g.name} (${fmt(g[mk])})`).join(', ') + (neg.length > 8 ? ' …' : '') + '.'\n          : `No ${ar.groupBy.join(' / ')} has a negative ${info.label.toLowerCase()}.`);\n      }\n      answerTable = buildTable({ query: aq }, { ...ar, groups: ar.groups.slice(0, 10), returned: Math.min(10, ar.groups.length) });\n    } else {\n      autoLines.push(mks.map(k => `${METRIC_INFO[k].label}: ${fmtVal(ar.totals[k], METRIC_INFO[k].kind)}`).join(' · ') + ` (${fnum(ar.rowsMatched)} order lines).`);\n    }\n  }\n}\nconst placeholder = /\\b(this|the) report (will|shows|lists|returns)\\b|\\bwill (identify|return|list|show|highlight|provide)\\b/i;\nconst agentAnswer = String(plan.direct_answer || '').trim();\nconst answerText = (!agentAnswer || placeholder.test(agentAnswer)) ? (autoLines.join(' ') || agentAnswer) : agentAnswer;\n\nconst kpi = (label, value, colour) => `<td width=\"25%\" style=\"vertical-align:top;padding:0 8px 0 0;\"><div style=\"border:1px solid #dce4ed;border-radius:8px;padding:14px;background:#fbfcfe;\"><div style=\"font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#64748b;\">${label}</div><div style=\"font-size:20px;font-weight:700;margin-top:4px;color:${colour};\">${value}</div></div></td>`;\nconst li = items => items.map(x => `<li style=\"margin:8px 0;\">${esc(x)}</li>`).join('');\nconst findings = list(plan.key_findings), recs = list(plan.recommendations), assumptions = list(plan.assumptions);\nconst h2 = t => `<h2 style=\"font-size:18px;color:#17324d;margin:26px 0 10px;border-bottom:1px solid #e5eaf0;padding-bottom:6px;\">${t}</h2>`;\nconst title = plan.title || 'Velora Superstore Analysis';\n\nconst html = `<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head>\n<body style=\"margin:0;background:#f2f5f9;color:#243447;font:14px/1.55 Arial,Helvetica,sans-serif;\">\n<div style=\"max-width:1000px;margin:20px auto;background:#fff;border:1px solid #dce4ed;border-radius:12px;overflow:hidden;\">\n<div style=\"background:#17324d;color:#fff;padding:24px 30px;\"><div style=\"font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#8DBCEB;\">Velora Superstore · Datacart Analyst</div><div style=\"font-size:24px;font-weight:700;margin-top:4px;\">${esc(title)}</div></div>\n<div style=\"padding:22px 30px;\">\n<p style=\"margin:0 0 6px;\"><b>Question:</b> ${esc(question)}</p>\n<div style=\"padding:10px 14px;background:#f5f8fb;border-left:4px solid #8dbceb;margin:10px 0 20px;font-size:13px;\"><b>Scope:</b> ${esc(scopeText)}</div>\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse;table-layout:fixed;margin:0 0 20px;\"><tr>\n${kpi('Total sales', money(T.sales), '#24476b')}${kpi('Total profit / loss', money(T.profit), T.profit >= 0 ? '#168c8c' : '#c0392b')}${kpi('Distinct orders', fnum(T.orders), '#24476b')}${kpi('Profit margin', Number(T.margin).toFixed(2) + '%', T.margin >= 0 ? '#168c8c' : '#c0392b')}\n</tr></table>\n${h2('Answer')}\n<div style=\"padding:14px 18px;background:#f0faf7;border-left:4px solid #168c8c;font-size:15px;\">${esc(answerText)}</div>\n${autoLines.length && answerText !== autoLines.join(' ') ? `<div style=\"margin:14px 0 6px;padding:12px 18px;background:#f5f8fb;border:1px solid #e5eaf0;border-radius:8px;\"><b>Key numbers (calculated from the data)</b><ul style=\"padding-left:20px;margin:8px 0 0;\">${li(autoLines)}</ul></div>` : ''}\n${answerTable ? `<div style=\"margin-top:12px;\">${answerTable}</div>` : ''}\n${findings.length ? h2('Key findings') + `<ul style=\"padding-left:20px;\">${li(findings)}</ul>` : ''}\n${chartsHtml ? h2('Charts') + chartsHtml : ''}\n${tablesHtml}\n${recs.length ? h2('Recommendations') + `<ul style=\"padding-left:20px;\">${li(recs)}</ul>` : ''}\n${assumptions.length ? `<p style=\"font-size:12px;color:#64748b;\"><b>Assumptions:</b> ${esc(assumptions.join(' | '))}</p>` : ''}\n${problems.length ? `<p style=\"font-size:12px;color:#b42318;\"><b>Note:</b> ${esc(problems.join(' | '))}</p>` : ''}\n</div>\n<div style=\"border-top:1px solid #e5eaf0;padding:12px 30px;color:#667085;font-size:11px;\">Data cleaning: ${cleanReport.rawRows} raw rows → ${cleanReport.cleanRows} clean rows (${cleanReport.duplicatesRemoved} duplicates removed, ${cleanReport.invalidRowsDropped} invalid rows dropped). All figures are calculated from the transaction data. Charts load from QuickChart; allow images in your email client.</div>\n</div></body></html>`;\n\nconst chatReply = [answerText, ...autoLines.slice(1), ...findings.slice(0, 3).map(f => '• ' + f), '', '📧 The full report with charts has been sent to your Gmail.'].filter(x => x !== undefined).join('\\n');\nreturn [{ json: { question, sendEmail: true, subject: 'Velora Report: ' + (plan.title || question).slice(0, 120), html, chatReply, problems } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        784,
+        48
+      ],
+      "id": "2bf9c5b1-b62a-4a3f-ad74-312f37d851f3",
+      "name": "Build Report"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "7ce2f8a3-4b46-40ea-a4f1-4eb610c64f35",
+              "leftValue": "={{ $json.sendEmail }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1008,
+        48
+      ],
+      "id": "8efb9f73-66d0-487a-9860-5baeef065655",
+      "name": "Report ready?"
+    },
+    {
+      "parameters": {
+        "sendTo": "devilalsingh2004@gmail.com",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1232,
+        -48
+      ],
+      "id": "a2ac933a-81c4-42a7-a0fc-abc5ea61e8d1",
+      "name": "Send a message",
+      "webhookId": "a54375e0-7f13-4221-b9c3-59301cb6bfc3",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "8kpTimmkHAx0ROM6",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $('Build Report').first().json;\nreturn [{ json: { output: r.chatReply } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1456,
+        48
+      ],
+      "id": "3234a56a-7f8d-4a8f-9247-beca93464d1f",
+      "name": "Reply to chat"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "Get row(s) in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get row(s) in sheet": {
+      "main": [
+        [
+          {
+            "node": "clean data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "clean data": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "query_velora_data": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Build Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Report": {
+      "main": [
+        [
+          {
+            "node": "Report ready?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report ready?": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply to chat",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message": {
+      "main": [
+        [
+          {
+            "node": "Reply to chat",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "3c05177d-dcee-4445-ae18-4f8b077ae54a",
+  "meta": {
+    "instanceId": "0b73164dac9e8bb260e0da38d66a60d7a36ee94bd3529325fe5971c59e8aee5d"
+  },
+  "nodeGroups": [],
+  "id": "t06jCHif76oTLm9A",
+  "tags": []
+}
