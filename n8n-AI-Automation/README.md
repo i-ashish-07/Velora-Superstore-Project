@@ -3,7 +3,7 @@
 # 📊 Velora Superstore: Sales & Profit Analysis
 ### Power BI Dashboard + AI Reporting Assistant
 
-[![Live Dashboard](https://img.shields.io/badge/🔴_Live_Dashboard-open-3b5bdb?style=for-the-badge)](https://i-ashish-07.github.io/Velora-Superstore-Project/)
+[![Live Dashboard](https://img.shields.io/badge/🔴_Live_Dashboard-open-3b5bdb?style=for-the-badge)](https://ashish0909.app.n8n.cloud/webhook/velora-dashboard)
 
 </div>
 
