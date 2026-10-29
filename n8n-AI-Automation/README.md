@@ -1,11 +1,9 @@
 <div align="center">
 
-# 📊 Velora Superstore
-### From raw retail data to boardroom insights, and an AI assistant that delivers them
+# 📊 Velora Superstore: Sales & Profit Analysis
+### Power BI Dashboard + AI Reporting Assistant
 
-**Python · SQL · Power BI · n8n · OpenAI · Google Workspace**
-
-[![Live Dashboard](https://img.shields.io/badge/🔴_Live_Interactive_Dashboard-open-3b5bdb?style=for-the-badge)](https://i-ashish-07.github.io/Velora-Superstore-Project/)
+[![Live Dashboard](https://img.shields.io/badge/🔴_Live_Dashboard-open-3b5bdb?style=for-the-badge)](https://i-ashish-07.github.io/Velora-Superstore-Project/)
 
 </div>
 
