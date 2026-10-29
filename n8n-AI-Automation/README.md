@@ -29,7 +29,7 @@ An end-to-end analytics project on 2014–2017 retail transactions, built in two
 | 🖼 **n8n workflow screenshots** | [n8n-AI-Automation](https://github.com/i-ashish-07/Velora-Superstore-Project/tree/main/n8n-AI-Automation) |
 | 📊 **Power BI dashboard** | [Velora Superstore Dashboard.pbix](https://github.com/i-ashish-07/Velora-Superstore-Project/blob/main/Velora%20Superstore%20Dashboard.pbix) |
 | 📄 **Dashboard & insights report** | [dashboard and insights.pdf](https://github.com/i-ashish-07/Velora-Superstore-Project/blob/main/dashboard%20and%20insights.pdf) |
-| 📓 **Python notebook (cleaning & EDA)** | [e-commerce_project .ipynb](https://github.com/i-ashish-07/Velora-Superstore-Project/blob/main/e-commerce_project%20.ipynb) |
+| 📓 **Python notebook (cleaning & EDA)** | [e-commerce_project .ipynb](https://github.com/i-ashish-07/Velora-Superstore-Project/blob/main/e-commerce_projectt.ipynb) |
 | 🗄 **SQL business questions** | [superstore questions.sql](https://github.com/i-ashish-07/Velora-Superstore-Project/blob/main/superstore%20questions.sql) |
 | 📋 **Business questions** | [Business Questions](https://github.com/i-ashish-07/Velora-Superstore-Project/blob/main/Business%20Questions) |
 | 🗂 **Dataset** | [Superstoree.csv](https://github.com/i-ashish-07/Velora-Superstore-Project/blob/main/Superstoree.csv) |
