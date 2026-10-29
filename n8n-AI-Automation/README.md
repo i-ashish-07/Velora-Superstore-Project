@@ -5,7 +5,7 @@
 
 **Python · SQL · Power BI · n8n · OpenAI · Google Workspace**
 
-[![Live Dashboard](https://img.shields.io/badge/🔴_Live_Interactive_Dashboard-open-3b5bdb?style=for-the-badge)](https://i-ashish-07.github.io/Velora-Superstore-Project/n8n-AI-Automation/)
+[![Live Dashboard](https://i-ashish-07.github.io/Velora-Superstore-Project/n8n-AI-Automation/)
 
 </div>
 
