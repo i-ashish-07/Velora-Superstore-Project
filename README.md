@@ -5,7 +5,7 @@
 
 **Python · SQL · Power BI · DAX · n8n · OpenAI**
 
-[![Live Dashboard](https://img.shields.io/badge/🔴_Live_Dashboard-open-3b5bdb?style=for-the-badge)](https://i-ashish-07.github.io/Velora-Superstore-Project/)
+[![Live Dashboard](https://img.shields.io/badge/🔴_Live_Dashboard-open-3b5bdb?style=for-the-badge)](https://github.com/i-ashish-07/Velora-Superstore-Project/blob/main/n8n-AI-Automation/index.html)
 [![Power BI](https://img.shields.io/badge/Power_BI-.pbix-F2C811?style=for-the-badge&logo=powerbi&logoColor=black)](Velora%20Superstore%20Dashboard.pbix)
 [![Insights Report](https://img.shields.io/badge/Insights_Report-PDF-d9480f?style=for-the-badge)](dashboard%20and%20insights.pdf)
 
